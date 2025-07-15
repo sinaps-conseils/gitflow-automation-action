@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 # Configuration
 CHANGELOG_FILE="CHANGELOG.md"
 TEMP_FILE=$(mktemp)
-PROJECT_NAME="Showroom"
+PROJECT_NAME="${PROJECT_NAME:-'GitFlow Automation Action'}"
 
 # Fonction d'affichage
 log() {
@@ -47,55 +47,35 @@ get_current_date() {
 
 # Fonction pour obtenir le dernier tag
 get_last_tag() {
-    git describe --tags --abbrev=0 2>/dev/null || echo ""
+    git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo ""
 }
 
-# Fonction pour obtenir la prochaine version
-get_next_version() {
-    local current_version=$(get_last_tag)
-    if [[ -z "$current_version" ]]; then
-        echo "v1.0.0"
-        return
+# Fonction pour valider le format de version
+validate_version() {
+    local version="$1"
+    if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+        error "Format de version invalide: $version"
+        error "Formats acceptés: v1.0.0, 1.0.0, v1.0.0-alpha"
+        return 1
     fi
-    
-    # Supprimer le 'v' du début
-    current_version=${current_version#v}
-    
-    # Séparer major.minor.patch
-    IFS='.' read -r major minor patch <<< "$current_version"
-    
-    # Analyser les commits depuis le dernier tag pour déterminer le type de version
-    local commits=$(git log --oneline $(get_last_tag)..HEAD 2>/dev/null || git log --oneline)
-    
-    local has_breaking=false
-    local has_feat=false
-    local has_fix=false
-    
-    while IFS= read -r commit; do
-        if [[ $commit =~ :boom:|:fire: ]] || [[ $commit =~ "BREAKING CHANGE" ]]; then
-            has_breaking=true
-        elif [[ $commit =~ :sparkles:|:rocket:|:tada: ]] || [[ $commit =~ " feat:" ]]; then
-            has_feat=true
-        elif [[ $commit =~ :bug:|:ambulance:|:adhesive_bandage: ]] || [[ $commit =~ " fix:" ]]; then
-            has_fix=true
-        fi
-    done <<< "$commits"
-    
-    # Déterminer le type de version
-    if $has_breaking; then
-        echo "v$((major + 1)).0.0"
-    elif $has_feat; then
-        echo "v$major.$((minor + 1)).0"
-    elif $has_fix; then
-        echo "v$major.$minor.$((patch + 1))"
-    else
-        echo "v$major.$minor.$((patch + 1))"
+    return 0
+}
+
+# Fonction pour déterminer si un commit doit être inclus
+should_include_commit() {
+    local commit="$1"
+    # Exclure les commits de merge
+    if [[ "$commit" =~ ^[a-f0-9]+[[:space:]]+Merge ]]; then
+        return 1
     fi
+    return 0
 }
 
 # Fonction pour catégoriser les commits
 categorize_commit() {
     local commit="$1"
+    # Convertir en minuscules pour la comparaison
+    local commit_lower=$(echo "$commit" | tr '[:upper:]' '[:lower:]')
     
     case "$commit" in
         *:sparkles:*|*:rocket:*|*:tada:*|*" feat:"*)
@@ -149,12 +129,22 @@ generate_changelog() {
     
     log "Génération du CHANGELOG pour $version..."
     
-    # Obtenir les commits
+    # === CORRECTION DU RANGE ===
+    # Obtenir les commits avec le range corrigé
     local git_range
     if [[ -n "$from_tag" ]]; then
         git_range="$from_tag..HEAD"
     else
-        git_range="HEAD"
+        # Chercher le dernier tag automatiquement
+        local last_tag=$(get_last_tag)
+        if [[ -n "$last_tag" ]]; then
+            git_range="$last_tag..HEAD"
+            log "Utilisation du dernier tag trouvé: $last_tag"
+        else
+            # Si pas de tag, limiter aux commits récents
+            git_range="HEAD~20..HEAD"
+            warning "Aucun tag trouvé, limitation aux 20 derniers commits"
+        fi
     fi
     
     log "Recherche des commits avec range: $git_range"
@@ -167,7 +157,15 @@ generate_changelog() {
         return 0
     fi
     
-    log "Nombre de commits trouvés: $(echo "$commits" | wc -l)"
+    local commit_count=$(echo "$commits" | wc -l)
+    log "Nombre de commits trouvés: $commit_count"
+    
+    # Validation du nombre de commits
+    if [[ $commit_count -gt 100 ]]; then
+        warning "Nombre de commits suspect ($commit_count), cela peut indiquer un problème de range"
+        warning "Limitation aux 50 derniers commits pour éviter les problèmes"
+        commits=$(git log --oneline --no-merges -50)
+    fi
     
     # Créer les catégories (compatible macOS)
     local cat_feat=""
@@ -186,7 +184,7 @@ generate_changelog() {
     
     # Classer les commits par catégorie
     while IFS= read -r commit; do
-        if [[ -n "$commit" ]]; then
+        if [[ -n "$commit" ]] && should_include_commit "$commit"; then
             local category=$(categorize_commit "$commit")
             local message=$(extract_commit_message "$commit")
             case "$category" in
@@ -229,122 +227,116 @@ generate_changelog() {
     
     log "Génération du fichier CHANGELOG..."
     
-    # Créer le fichier temporaire
-    if ! touch "$TEMP_FILE"; then
-        error "Impossible de créer le fichier temporaire: $TEMP_FILE"
-        return 1
+    # Créer l'entrée du changelog
+    local date=$(get_current_date)
+    local changelog_entry="## [$version] - $date"
+    
+    # Ajouter les catégories non vides
+    if [[ -n "$cat_breaking" ]]; then
+        changelog_entry="$changelog_entry\n\n### 💥 Changements incompatibles"
+        changelog_entry="$changelog_entry$cat_breaking"
     fi
     
-    # Générer le changelog
-    {
-        echo "# Changelog"
-        echo ""
-        echo "Toutes les modifications notables de ce projet seront documentées dans ce fichier."
-        echo ""
-        echo "Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),"
-        echo "et ce projet adhère au [Versioning Sémantique](https://semver.org/lang/fr/)."
-        echo ""
+    if [[ -n "$cat_feat" ]]; then
+        changelog_entry="$changelog_entry\n\n### ✨ Nouvelles fonctionnalités"
+        changelog_entry="$changelog_entry$cat_feat"
+    fi
+    
+    if [[ -n "$cat_fix" ]]; then
+        changelog_entry="$changelog_entry\n\n### 🐛 Corrections"
+        changelog_entry="$changelog_entry$cat_fix"
+    fi
+    
+    if [[ -n "$cat_perf" ]]; then
+        changelog_entry="$changelog_entry\n\n### ⚡ Performance"
+        changelog_entry="$changelog_entry$cat_perf"
+    fi
+    
+    if [[ -n "$cat_refactor" ]]; then
+        changelog_entry="$changelog_entry\n\n### ♻️ Refactoring"
+        changelog_entry="$changelog_entry$cat_refactor"
+    fi
+    
+    if [[ -n "$cat_security" ]]; then
+        changelog_entry="$changelog_entry\n\n### 🔒 Sécurité"
+        changelog_entry="$changelog_entry$cat_security"
+    fi
+    
+    if [[ -n "$cat_docs" ]]; then
+        changelog_entry="$changelog_entry\n\n### 📚 Documentation"
+        changelog_entry="$changelog_entry$cat_docs"
+    fi
+    
+    if [[ -n "$cat_style" ]]; then
+        changelog_entry="$changelog_entry\n\n### 🎨 Style"
+        changelog_entry="$changelog_entry$cat_style"
+    fi
+    
+    if [[ -n "$cat_test" ]]; then
+        changelog_entry="$changelog_entry\n\n### 🧪 Tests"
+        changelog_entry="$changelog_entry$cat_test"
+    fi
+    
+    if [[ -n "$cat_chore" ]]; then
+        changelog_entry="$changelog_entry\n\n### 🔧 Maintenance"
+        changelog_entry="$changelog_entry$cat_chore"
+    fi
+    
+    if [[ -n "$cat_other" ]]; then
+        changelog_entry="$changelog_entry\n\n### 📝 Autres"
+        changelog_entry="$changelog_entry$cat_other"
+    fi
+    
+    # Créer ou mettre à jour le changelog
+    if [[ -f "$CHANGELOG_FILE" ]]; then
+        log "Mise à jour du CHANGELOG existant..."
         
-        # Ajouter la nouvelle version
-        echo "## [$version] - $(get_current_date)"
-        echo ""
-        
-        # Ajouter les catégories non vides
-        local categories_order=(
-            "breaking:💥 Changements incompatibles"
-            "feat:✨ Nouvelles fonctionnalités"
-            "fix:🐛 Corrections"
-            "perf:⚡ Performance"
-            "security:🔒 Sécurité"
-            "refactor:♻️ Refactoring"
-            "docs:📚 Documentation"
-            "style:🎨 Style"
-            "test:🧪 Tests"
-            "chore:🔧 Maintenance"
-            "other:📝 Autres"
-        )
-        
-        for cat_info in "${categories_order[@]}"; do
-            local cat_key="${cat_info%:*}"
-            local cat_title="${cat_info#*:}"
-            local cat_content=""
+        # Chercher la ligne [Unreleased]
+        if grep -q "## \[Unreleased\]" "$CHANGELOG_FILE"; then
+            # Insérer après la section Unreleased
+            local line_num=$(grep -n "## \[Unreleased\]" "$CHANGELOG_FILE" | head -1 | cut -d: -f1)
             
-            # Récupérer le contenu selon la catégorie
-            case "$cat_key" in
-                "breaking") cat_content="$cat_breaking" ;;
-                "feat") cat_content="$cat_feat" ;;
-                "fix") cat_content="$cat_fix" ;;
-                "perf") cat_content="$cat_perf" ;;
-                "security") cat_content="$cat_security" ;;
-                "refactor") cat_content="$cat_refactor" ;;
-                "docs") cat_content="$cat_docs" ;;
-                "style") cat_content="$cat_style" ;;
-                "test") cat_content="$cat_test" ;;
-                "chore") cat_content="$cat_chore" ;;
-                "other") cat_content="$cat_other" ;;
-            esac
+            # Créer le nouveau contenu
+            head -n $((line_num + 1)) "$CHANGELOG_FILE" > "$TEMP_FILE"
+            echo "" >> "$TEMP_FILE"
+            echo -e "$changelog_entry" >> "$TEMP_FILE"
+            echo "" >> "$TEMP_FILE"
+            tail -n +$((line_num + 2)) "$CHANGELOG_FILE" >> "$TEMP_FILE"
             
-            if [[ -n "$cat_content" ]]; then
-                echo "### $cat_title"
-                echo ""
-                echo -e "$cat_content"
-                echo ""
-            fi
-        done
-        
-        # Ajouter l'ancien changelog s'il existe
-        if [[ -f "$CHANGELOG_FILE" ]]; then
-            # Trouver la ligne après l'en-tête et ajouter le contenu existant
-            sed -n '/^## \[/,$p' "$CHANGELOG_FILE" 2>/dev/null || true
+            mv "$TEMP_FILE" "$CHANGELOG_FILE"
+        else
+            # Insérer au début
+            echo -e "$changelog_entry\n" > "$TEMP_FILE"
+            cat "$CHANGELOG_FILE" >> "$TEMP_FILE"
+            mv "$TEMP_FILE" "$CHANGELOG_FILE"
         fi
-    } > "$TEMP_FILE"
-    
-    # Vérifier que le fichier temporaire a été créé correctement
-    if [[ ! -f "$TEMP_FILE" ]] || [[ ! -s "$TEMP_FILE" ]]; then
-        error "Erreur lors de la création du fichier temporaire"
-        return 1
-    fi
-    
-    # Remplacer le fichier
-    if ! mv "$TEMP_FILE" "$CHANGELOG_FILE"; then
-        error "Impossible de remplacer le fichier CHANGELOG.md"
-        return 1
+    else
+        log "Création d'un nouveau CHANGELOG..."
+        cat > "$CHANGELOG_FILE" << EOF
+# Changelog
+
+Toutes les modifications notables de ce projet seront documentées dans ce fichier.
+
+Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
+et ce projet adhère au [Versioning Sémantique](https://semver.org/lang/fr/).
+
+## [Unreleased]
+
+$(echo -e "$changelog_entry")
+EOF
     fi
     
     success "CHANGELOG généré avec succès !"
-    return 0
-}
-
-# Fonction principale
-main() {
-    local from_tag="$1"
-    local to_tag="$2"
-    local version="$3"
-    
-    log "🚀 Génération du CHANGELOG pour $PROJECT_NAME"
-    
-    # Si aucune version spécifiée, calculer la prochaine
-    if [[ -z "$version" ]]; then
-        version=$(get_next_version)
-        log "Version calculée automatiquement: $version"
-    fi
-    
-    # Générer le changelog
-    log "Début de la génération du changelog..."
-    generate_changelog "$from_tag" "$to_tag" "$version"
-    local generate_exit_code=$?
-    
-    if [[ $generate_exit_code -ne 0 ]]; then
-        error "Erreur lors de la génération du changelog (exit code: $generate_exit_code)"
-        return $generate_exit_code
-    fi
-    
-    echo ""
     success "CHANGELOG mis à jour dans $CHANGELOG_FILE"
+    
+    # Exports pour GitHub Actions
+    if [[ -n "$GITHUB_OUTPUT" ]]; then
+        echo "changelog-updated=true" >> "$GITHUB_OUTPUT"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+    fi
+    
     success "Version: $version"
     
-    # Afficher un aperçu
-    echo ""
     log "Aperçu du changelog:"
     echo "===================="
     if [[ -f "$CHANGELOG_FILE" ]]; then
@@ -370,8 +362,42 @@ main() {
     echo "3. Créer le tag: git tag $version"
     echo "4. Pousser: git push origin $version"
     
-    log "Fonction main terminée avec succès"
+    log "Fonction generate_changelog terminée avec succès"
     return 0
+}
+
+# Fonction principale
+main() {
+    local from_tag="$1"
+    local to_tag="$2"
+    local version="$3"
+    
+    log "🚀 Génération du CHANGELOG pour $PROJECT_NAME"
+    log "Début de la génération du changelog..."
+    
+    # Paramètres par défaut
+    if [[ -z "$version" ]]; then
+        version="auto"
+    fi
+    
+    # Valider la version si elle n'est pas "auto"
+    if [[ "$version" != "auto" ]]; then
+        if ! validate_version "$version"; then
+            return 1
+        fi
+    fi
+    
+    # Générer le changelog
+    if generate_changelog "$from_tag" "$to_tag" "$version"; then
+        success "Génération du changelog terminée avec succès"
+        log "Fonction main terminée avec succès"
+        log "Fonction main terminée avec exit code: 0"
+        success "Script terminé avec succès"
+        return 0
+    else
+        error "Échec de la génération du changelog"
+        return 1
+    fi
 }
 
 # Nettoyage en cas d'interruption
@@ -400,11 +426,9 @@ main "$@"
 main_exit_code=$?
 
 log "Fonction main terminée avec exit code: $main_exit_code"
-
 if [[ $main_exit_code -eq 0 ]]; then
     success "Script terminé avec succès"
-    exit 0
 else
-    error "Script terminé avec erreur (exit code: $main_exit_code)"
-    exit $main_exit_code
+    error "Script terminé avec des erreurs"
 fi
+exit $main_exit_code
