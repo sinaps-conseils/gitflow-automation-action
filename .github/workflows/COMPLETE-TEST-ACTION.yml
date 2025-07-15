@@ -7,6 +7,15 @@ on:
         description: 'Version à tester'
         required: true
         default: 'v1.0.1-test'
+      test-type:
+        description: 'Type de test'
+        required: false
+        default: 'manual'
+        type: choice
+        options:
+          - manual
+          - auto
+          - branch
   push:
     branches: [ main, develop ]
   pull_request:
@@ -14,8 +23,17 @@ on:
 
 jobs:
   test-basic:
-    name: 🧪 Test de Base
+    name: 🧪 Test Formats de Version
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version: 
+          - 'v1.0.1-test'
+          - 'v2.0.0-alpha'
+          - 'v1.5.0-beta.1'
+          - '1.0.0'
+          - 'v1.0.0'
+          - 'auto'
     
     steps:
       - name: 📥 Checkout
