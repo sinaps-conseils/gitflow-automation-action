@@ -1,0 +1,13 @@
+{
+  "name": "test-package.json",
+  "version": "1.0.0",
+  "description": "Test pour l'action GitFlow",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Test passed\"",
+    "build": "echo \"Build completed\"",
+    "lint": "echo \"Linting completed\""
+  },
+  "author": "Sinaps Conseils",
+  "license": "MIT"
+}
