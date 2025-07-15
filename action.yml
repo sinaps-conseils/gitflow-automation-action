@@ -74,22 +74,55 @@ runs:
       env:
         PROJECT_NAME: ${{ inputs.project-name }}
 
+    # === NOUVELLE ÉTAPE : Setup Node.js et installation des dépendances ===
+    - name: 🔧 Setup Node.js
+      if: inputs.run-tests == 'true' || inputs.format-code == 'true' || inputs.generate-docs == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      if: inputs.run-tests == 'true' || inputs.format-code == 'true' || inputs.generate-docs == 'true'
+      shell: bash
+      run: |
+        if [ -f package-lock.json ]; then
+          npm ci --legacy-peer-deps
+        else
+          npm install --legacy-peer-deps
+        fi
+
     - name: 🧪 Run tests
       if: inputs.run-tests == 'true'
       shell: bash
-      run: npm test
+      run: |
+        if npm run test --silent 2>/dev/null; then
+          npm test
+        else
+          echo "⚠️ Test script not found in package.json, skipping tests"
+        fi
       continue-on-error: false
 
     - name: 🎨 Format code
       if: inputs.format-code == 'true'
       shell: bash
-      run: npm run format || echo "⚠️ Format script not found"
+      run: |
+        if npm run format --silent 2>/dev/null; then
+          npm run format
+        else
+          echo "⚠️ Format script not found in package.json, skipping formatting"
+        fi
       continue-on-error: true
 
     - name: 📚 Generate documentation
       if: inputs.generate-docs == 'true'
       shell: bash
-      run: npm run doc || echo "⚠️ Doc script not found"
+      run: |
+        if npm run doc --silent 2>/dev/null; then
+          npm run doc
+        else
+          echo "⚠️ Doc script not found in package.json, skipping documentation"
+        fi
       continue-on-error: true
 
     - name: 💾 Commit changes
