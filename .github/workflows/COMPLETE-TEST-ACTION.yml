@@ -219,7 +219,7 @@ jobs:
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          version: 'v1.0.1-npm'
+          version: 'v1.0.1'
           project-name: 'Test npm'
           run-tests: 'false'
           commit-changes: 'false'
