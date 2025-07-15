@@ -90,84 +90,6 @@ update_app_json() {
     fi
 }
 
-# Fonction pour mettre à jour pubspec.yaml (Flutter)
-update_pubspec_yaml() {
-    local version="$1"
-    # Supprimer le 'v' du début
-    local version_number="${version#v}"
-    
-    if [[ -f "pubspec.yaml" ]]; then
-        log "Mise à jour de pubspec.yaml"
-        
-        # Sauvegarde
-        cp pubspec.yaml pubspec.yaml.bak
-        
-        # Mise à jour avec sed
-        if sed -i.tmp "s/^version: .*/version: $version_number+1/" pubspec.yaml; then
-            rm -f pubspec.yaml.tmp pubspec.yaml.bak
-            success "pubspec.yaml mis à jour vers $version_number+1"
-        else
-            mv pubspec.yaml.bak pubspec.yaml
-            error "Échec de la mise à jour de pubspec.yaml"
-            return 1
-        fi
-    else
-        warning "pubspec.yaml non trouvé, ignoré"
-    fi
-}
-
-# Fonction pour mettre à jour pom.xml (Maven)
-update_pom_xml() {
-    local version="$1"
-    # Supprimer le 'v' du début
-    local version_number="${version#v}"
-    
-    if [[ -f "pom.xml" ]]; then
-        log "Mise à jour de pom.xml"
-        
-        # Sauvegarde
-        cp pom.xml pom.xml.bak
-        
-        # Mise à jour avec sed (première occurrence de <version>)
-        if sed -i.tmp "0,/<version>/{s/<version>[^<]*<\/version>/<version>$version_number<\/version>/}" pom.xml; then
-            rm -f pom.xml.tmp pom.xml.bak
-            success "pom.xml mis à jour vers $version_number"
-        else
-            mv pom.xml.bak pom.xml
-            error "Échec de la mise à jour de pom.xml"
-            return 1
-        fi
-    else
-        warning "pom.xml non trouvé, ignoré"
-    fi
-}
-
-# Fonction pour mettre à jour Cargo.toml (Rust)
-update_cargo_toml() {
-    local version="$1"
-    # Supprimer le 'v' du début
-    local version_number="${version#v}"
-    
-    if [[ -f "Cargo.toml" ]]; then
-        log "Mise à jour de Cargo.toml"
-        
-        # Sauvegarde
-        cp Cargo.toml Cargo.toml.bak
-        
-        # Mise à jour avec sed
-        if sed -i.tmp "s/^version = .*/version = \"$version_number\"/" Cargo.toml; then
-            rm -f Cargo.toml.tmp Cargo.toml.bak
-            success "Cargo.toml mis à jour vers $version_number"
-        else
-            mv Cargo.toml.bak Cargo.toml
-            error "Échec de la mise à jour de Cargo.toml"
-            return 1
-        fi
-    else
-        warning "Cargo.toml non trouvé, ignoré"
-    fi
-}
-
 # Fonction principale
 main() {
     local version="$VERSION"
@@ -182,9 +104,6 @@ main() {
     # Mettre à jour les différents fichiers selon le type de projet
     update_package_json "$version"
     update_app_json "$version"
-    update_pubspec_yaml "$version"
-    update_pom_xml "$version"
-    update_cargo_toml "$version"
     
     success "Mise à jour des versions terminée pour $version"
     return 0
