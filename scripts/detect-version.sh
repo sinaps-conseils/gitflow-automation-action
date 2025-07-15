@@ -1,155 +1,107 @@
 #!/bin/bash
 set -e
 
-# Script de détection/validation de version pour GitHub Action GitFlow
-
-# Couleurs pour les messages
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-log() {
-    echo -e "${BLUE}🔍 $1${NC}"
-}
-
-success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
-
-# Fonction pour obtenir le dernier tag
-get_last_tag() {
-    git describe --tags --abbrev=0 2>/dev/null || echo ""
-}
-
-# Fonction pour calculer la prochaine version
-get_next_version() {
-    local current_version=$(get_last_tag)
-    if [[ -z "$current_version" ]]; then
-        echo "v1.0.0"
-        return
-    fi
-    
-    # Supprimer le 'v' du début
-    current_version=${current_version#v}
-    
-    # Séparer major.minor.patch
-    IFS='.' read -r major minor patch <<< "$current_version"
-    
-    # Analyser les commits depuis le dernier tag
-    local last_tag=$(get_last_tag)
-    local commits
-    if [[ -n "$last_tag" ]]; then
-        commits=$(git log --oneline "${last_tag}..HEAD" 2>/dev/null || echo "")
+# Fonction pour valider le format de version
+validate_version() {
+    local version=$1
+    # Accepter les formats : vX.Y.Z, vX.Y.Z-suffix, X.Y.Z, X.Y.Z-suffix
+    if [[ $version =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+        return 0
     else
-        commits=$(git log --oneline HEAD 2>/dev/null || echo "")
-    fi
-    
-    if [[ -z "$commits" ]]; then
-        log "Aucun commit depuis $last_tag, version patch par défaut"
-        echo "v$major.$minor.$((patch + 1))"
-        return
-    fi
-    
-    local has_breaking=false
-    local has_feat=false
-    local has_fix=false
-    
-    while IFS= read -r commit; do
-        if [[ $commit =~ :boom:|:fire: ]] || [[ $commit =~ "BREAKING CHANGE" ]]; then
-            has_breaking=true
-        elif [[ $commit =~ :sparkles:|:rocket:|:tada: ]] || [[ $commit =~ " feat:" ]]; then
-            has_feat=true
-        elif [[ $commit =~ :bug:|:ambulance:|:adhesive_bandage: ]] || [[ $commit =~ " fix:" ]]; then
-            has_fix=true
-        fi
-    done <<< "$commits"
-    
-    # Déterminer le type de version
-    if $has_breaking; then
-        echo "v$((major + 1)).0.0"
-    elif $has_feat; then
-        echo "v$major.$((minor + 1)).0"
-    elif $has_fix; then
-        echo "v$major.$minor.$((patch + 1))"
-    else
-        echo "v$major.$minor.$((patch + 1))"
+        return 1
     fi
 }
 
-# Fonction pour détecter la version depuis le nom de branche
-detect_version_from_branch() {
-    local branch_name="$GITHUB_HEAD_REF"
-    if [[ -z "$branch_name" ]]; then
-        branch_name="$GITHUB_REF_NAME"
-    fi
-    
-    if [[ $branch_name =~ ^release/([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-        echo "v${BASH_REMATCH[1]}"
+# Fonction pour normaliser la version (ajouter v si manquant)
+normalize_version() {
+    local version=$1
+    if [[ $version =~ ^[0-9] ]]; then
+        echo "v$version"
     else
-        echo ""
+        echo "$version"
     fi
 }
 
-# Fonction principale
-main() {
-    log "Détection de la version pour ${PROJECT_NAME:-Project}"
+# Fonction pour détecter la version automatiquement
+detect_auto_version() {
+    local current_version=""
     
-    local version="$INPUT_VERSION"
-    local version_source="manuel"
+    # Essayer de récupérer depuis package.json
+    if [ -f package.json ]; then
+        current_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | grep -o '[0-9][^"]*')
+    fi
     
-    # Si aucune version spécifiée, essayer de la détecter
-    if [[ -z "$version" ]]; then
-        # Essayer depuis le nom de branche
-        version=$(detect_version_from_branch)
-        if [[ -n "$version" ]]; then
-            version_source="branche"
+    # Si pas trouvé, essayer depuis app.json
+    if [ -z "$current_version" ] && [ -f app.json ]; then
+        current_version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' app.json | grep -o '[0-9][^"]*')
+    fi
+    
+    # Si pas trouvé, essayer depuis le dernier tag git
+    if [ -z "$current_version" ]; then
+        current_version=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
+    fi
+    
+    # Incrémenter la version patch
+    local major=$(echo $current_version | cut -d. -f1)
+    local minor=$(echo $current_version | cut -d. -f2)
+    local patch=$(echo $current_version | cut -d. -f3 | cut -d- -f1)  # Enlever suffix si présent
+    
+    patch=$((patch + 1))
+    echo "v$major.$minor.$patch"
+}
+
+# Fonction pour détecter depuis le nom de la branche
+detect_branch_version() {
+    local branch_name=$(git branch --show-current 2>/dev/null || echo "main")
+    
+    # Chercher un pattern de version dans le nom de la branche
+    if [[ $branch_name =~ (release|hotfix)/(v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?) ]]; then
+        local version="${BASH_REMATCH[2]}"
+        normalize_version "$version"
+    else
+        echo "Impossible de détecter la version depuis la branche: $branch_name" >&2
+        detect_auto_version
+    fi
+}
+
+# Main logic
+VERSION_INPUT="${INPUT_VERSION:-auto}"
+
+echo "🔍 Détection de version avec input: $VERSION_INPUT"
+
+case $VERSION_INPUT in
+    "auto")
+        VERSION=$(detect_auto_version)
+        echo "Version détectée automatiquement: $VERSION"
+        ;;
+    "branch")
+        VERSION=$(detect_branch_version)
+        echo "Version détectée depuis la branche: $VERSION"
+        ;;
+    *)
+        # Version manuelle - normaliser et valider
+        VERSION=$(normalize_version "$VERSION_INPUT")
+        if validate_version "$VERSION"; then
+            echo "Version manuelle validée: $VERSION"
         else
-            # Calculer automatiquement
-            version=$(get_next_version)
-            version_source="automatique"
+            echo "❌ Format de version invalide: $VERSION_INPUT" >&2
+            echo "Formats acceptés: vX.Y.Z, vX.Y.Z-suffix, X.Y.Z, X.Y.Z-suffix" >&2
+            echo "Exemples: v1.0.0, v1.0.0-test, v1.0.0-alpha.1, v1.0.0-beta" >&2
+            exit 1
         fi
-    fi
-    
-    # Valider le format de version
-    if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        error "Format de version invalide: $version (attendu: vX.Y.Z)"
-        return 1
-    fi
-    
-    # Vérifier qu'on est dans un repo Git
-    if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        error "Ce script doit être exécuté dans un dépôt Git"
-        return 1
-    fi
-    
-    # Afficher les informations
-    log "Version détectée: $version (source: $version_source)"
-    
-    # Informations supplémentaires
-    local last_tag=$(get_last_tag)
-    if [[ -n "$last_tag" ]]; then
-        log "Dernière version: $last_tag"
-    else
-        log "Première version du projet"
-    fi
-    
-    # Exporter la version
-    echo "version=$version" >> $GITHUB_OUTPUT
-    echo "version-source=$version_source" >> $GITHUB_OUTPUT
-    
-    success "Version validée: $version"
-    return 0
-}
+        ;;
+esac
 
-# Exécuter le script
-main "$@"
+# Vérifier que la version finale est valide
+if ! validate_version "$VERSION"; then
+    echo "❌ Version finale invalide: $VERSION" >&2
+    exit 1
+fi
+
+echo "✅ Version finale: $VERSION"
+
+# Exporter la version pour les étapes suivantes
+echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+# Export pour les scripts suivants
+export NEW_VERSION="$VERSION"
