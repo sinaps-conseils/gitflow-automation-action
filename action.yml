@@ -1,0 +1,166 @@
+name: 'GitFlow Automation'
+description: 'Automatise le workflow GitFlow avec génération de changelog et gestion des versions'
+author: 'Quentin NCL - SINAPS Conseils'
+
+inputs:
+  github-token:
+    description: 'GitHub token pour les opérations Git et API'
+    required: true
+  version:
+    description: 'Version à créer (format vX.Y.Z). Si non spécifiée, sera calculée automatiquement.'
+    required: false
+    default: ''
+  node-version:
+    description: 'Version de Node.js à utiliser'
+    required: false
+    default: '18'
+  package-manager:
+    description: 'Package manager à utiliser (npm, yarn, pnpm)'
+    required: false
+    default: 'npm'
+  project-name:
+    description: 'Nom du projet pour les messages du changelog'
+    required: false
+    default: 'Project'
+  run-tests:
+    description: 'Exécuter les tests après la préparation'
+    required: false
+    default: 'true'
+  format-code:
+    description: 'Formater le code automatiquement'
+    required: false
+    default: 'true'
+  generate-docs:
+    description: 'Générer la documentation automatiquement'
+    required: false
+    default: 'true'
+  commit-changes:
+    description: 'Commiter automatiquement les changements'
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'Version créée ou utilisée'
+    value: ${{ steps.detect-version.outputs.version }}
+  changelog-updated:
+    description: 'Indique si le changelog a été mis à jour'
+    value: ${{ steps.generate-changelog.outputs.updated }}
+  changes-committed:
+    description: 'Indique si des changements ont été commités'
+    value: ${{ steps.commit-changes.outputs.committed }}
+  version-code:
+    description: 'Nouveau versionCode (pour React Native/Expo)'
+    value: ${{ steps.update-versions.outputs.version-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 🔧 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.package-manager }}
+
+    - name: 📦 Install dependencies
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          "yarn")
+            yarn install --frozen-lockfile
+            ;;
+          "pnpm")
+            pnpm install --frozen-lockfile
+            ;;
+          *)
+            npm ci --legacy-peer-deps
+            ;;
+        esac
+
+    - name: 🔍 Detect or validate version
+      id: detect-version
+      shell: bash
+      run: ${{ github.action_path }}/scripts/detect-version.sh
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        PROJECT_NAME: ${{ inputs.project-name }}
+
+    - name: 🔄 Update versions in files
+      id: update-versions
+      shell: bash
+      run: ${{ github.action_path }}/scripts/update-versions.sh
+      env:
+        VERSION: ${{ steps.detect-version.outputs.version }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+
+    - name: 📝 Generate changelog
+      id: generate-changelog
+      shell: bash
+      run: ${{ github.action_path }}/scripts/generate-changelog.sh "" "" "${{ steps.detect-version.outputs.version }}"
+      env:
+        PROJECT_NAME: ${{ inputs.project-name }}
+
+    - name: 🧪 Run tests
+      if: inputs.run-tests == 'true'
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          "yarn")
+            yarn test
+            ;;
+          "pnpm")
+            pnpm test
+            ;;
+          *)
+            npm test
+            ;;
+        esac
+      continue-on-error: false
+
+    - name: 🎨 Format code
+      if: inputs.format-code == 'true'
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          "yarn")
+            yarn format || yarn run format || echo "⚠️ Format script not found"
+            ;;
+          "pnpm")
+            pnpm format || pnpm run format || echo "⚠️ Format script not found"
+            ;;
+          *)
+            npm run format || echo "⚠️ Format script not found"
+            ;;
+        esac
+      continue-on-error: true
+
+    - name: 📚 Generate documentation
+      if: inputs.generate-docs == 'true'
+      shell: bash
+      run: |
+        case "${{ inputs.package-manager }}" in
+          "yarn")
+            yarn doc || yarn run doc || echo "⚠️ Doc script not found"
+            ;;
+          "pnpm")
+            pnpm doc || pnpm run doc || echo "⚠️ Doc script not found"
+            ;;
+          *)
+            npm run doc || echo "⚠️ Doc script not found"
+            ;;
+        esac
+      continue-on-error: true
+
+    - name: 💾 Commit changes
+      if: inputs.commit-changes == 'true'
+      id: commit-changes
+      shell: bash
+      run: ${{ github.action_path }}/scripts/commit-changes.sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        VERSION: ${{ steps.detect-version.outputs.version }}
+        GITHUB_ACTOR: ${{ github.actor }}
+
+branding:
+  icon: 'git-branch'
+  color: 'blue'
