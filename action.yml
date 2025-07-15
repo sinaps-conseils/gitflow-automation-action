@@ -52,15 +52,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: 🔧 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ inputs.node-version }}
-
-    - name: 📦 Install dependencies
-      shell: bash
-      run: npm ci --legacy-peer-deps
-      
     - name: 🔍 Detect or validate version
       id: detect-version
       shell: bash
