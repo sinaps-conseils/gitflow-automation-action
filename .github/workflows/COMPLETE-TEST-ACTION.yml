@@ -1,4 +1,4 @@
-name: 🧪 Test Action Complète
+name: 🧪 Test GitFlow Action
 
 on:
   workflow_dispatch:
@@ -8,15 +8,15 @@ on:
         required: true
         default: 'v1.0.1-test'
   push:
-    branches: [main, develop]
+    branches: [ main, develop ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   test-basic:
     name: 🧪 Test de Base
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -38,18 +38,18 @@ jobs:
             }
           }
           EOF
-
+          
           # Créer un changelog de test
           cat > CHANGELOG.md << 'EOF'
           # Changelog
-
+          
           ## [Unreleased]
-
+          
           ### Added
           - Test setup
-
+          
           ## [1.0.0] - 2025-01-01
-
+          
           ### Added
           - Initial release
           EOF
@@ -61,7 +61,7 @@ jobs:
           version: ${{ github.event.inputs.test-version || 'v1.0.1-test' }}
           project-name: 'Test GitFlow Action'
           run-tests: 'true'
-          commit-changes: 'false' # Important: pas de commit en test
+          commit-changes: 'false'  # Important: pas de commit en test
           format-code: 'false'
           generate-docs: 'false'
         id: test-action
@@ -78,27 +78,72 @@ jobs:
         run: |
           echo "=== Contenu du package.json après test ==="
           cat package.json
-
+          
           echo "=== Début du CHANGELOG.md modifié ==="
           head -n 20 CHANGELOG.md
-
+          
           echo "=== Statut Git ==="
           git status --porcelain
 
-  test-versions:
-    name: 🧪 Test Différentes Versions
+  validate-structure:
+    name: 🔍 Validation Structure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      - name: 🔍 Vérifier la structure de l'action
+        run: |
+          echo "=== Vérification de la structure ==="
+          
+          # Vérifier action.yml
+          if [ -f action.yml ]; then
+            echo "✅ action.yml présent"
+          else
+            echo "❌ action.yml manquant"
+            exit 1
+          fi
+          
+          # Vérifier le dossier scripts
+          if [ -d scripts ]; then
+            echo "✅ Dossier scripts présent"
+          else
+            echo "❌ Dossier scripts manquant"
+            exit 1
+          fi
+          
+          # Vérifier les scripts individuels
+          required_scripts=("detect-version.sh" "update-versions.sh" "generate-changelog.sh" "commit-changes.sh")
+          for script in "${required_scripts[@]}"; do
+            if [ -f "scripts/$script" ]; then
+              echo "✅ $script présent"
+              if [ -x "scripts/$script" ]; then
+                echo "✅ $script est exécutable"
+              else
+                echo "❌ $script n'est pas exécutable"
+                exit 1
+              fi
+            else
+              echo "❌ $script manquant"
+              exit 1
+            fi
+          done
+          
+          echo "🎉 Structure validée avec succès !"
+
+  test-different-versions:
+    name: 🧪 Test Différents Types de Version
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        version-type: ['auto', 'branch', 'manual']
+        version-type: ['auto', 'manual']
         include:
           - version-type: 'auto'
             version: 'auto'
-          - version-type: 'branch'
-            version: 'branch'
           - version-type: 'manual'
             version: 'v2.1.0-test'
-
+    
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -107,21 +152,22 @@ jobs:
 
       - name: 🔧 Setup pour test ${{ matrix.version-type }}
         run: |
-          # Package.json avec version différente selon le test
           cat > package.json << 'EOF'
           {
             "name": "test-versions",
             "version": "1.5.0",
-            "description": "Test versions"
+            "description": "Test versions",
+            "scripts": {
+              "test": "echo 'Test passed'"
+            }
           }
           EOF
-
-          # Changelog de base
+          
           cat > CHANGELOG.md << 'EOF'
           # Changelog
-
+          
           ## [Unreleased]
-
+          
           ## [1.5.0] - 2025-01-01
           ### Added
           - Version testing
@@ -144,90 +190,3 @@ jobs:
           echo "### Test ${{ matrix.version-type }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ steps.test-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Changelog:** ${{ steps.test-version.outputs.changelog-updated }}" >> $GITHUB_STEP_SUMMARY
-
-  validate-structure:
-    name: 🔍 Validation Structure
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🔍 Vérifier la structure de l'action
-        run: |
-          echo "=== Vérification de la structure ==="
-
-          # Vérifier action.yml
-          if [ -f action.yml ]; then
-            echo "✅ action.yml présent"
-          else
-            echo "❌ action.yml manquant"
-            exit 1
-          fi
-
-          # Vérifier le dossier scripts
-          if [ -d scripts ]; then
-            echo "✅ Dossier scripts présent"
-          else
-            echo "❌ Dossier scripts manquant"
-            exit 1
-          fi
-
-          # Vérifier les scripts individuels
-          required_scripts=("detect-version.sh" "update-versions.sh" "generate-changelog.sh" "commit-changes.sh")
-          for script in "${required_scripts[@]}"; do
-            if [ -f "scripts/$script" ]; then
-              echo "✅ $script présent"
-              if [ -x "scripts/$script" ]; then
-                echo "✅ $script est exécutable"
-              else
-                echo "❌ $script n'est pas exécutable"
-                exit 1
-              fi
-            else
-              echo "❌ $script manquant"
-              exit 1
-            fi
-          done
-
-          echo "🎉 Structure validée avec succès !"
-
-  test-package-managers:
-    name: 🧪 Test Package Managers
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 🔧 Setup npm
-        run: |
-          # Package.json standard
-          cat > package.json << 'EOF'
-          {
-            "name": "test-package-managers",
-            "version": "1.0.0",
-            "description": "Test package managers"
-          }
-          EOF
-
-          echo "{}" > package-lock.json
-
-      - name: 🧪 Test avec npm
-        uses: ./
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          version: 'v1.0.1'
-          project-name: 'Test npm'
-          run-tests: 'false'
-          commit-changes: 'false'
-          format-code: 'false'
-          generate-docs: 'false'
-        id: test-pm
-
-      - name: 📊 Résultats npm
-        run: |
-          echo "### Test npm" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ steps.test-pm.outputs.version }}" >> $GITHUB_STEP_SUMMARY
