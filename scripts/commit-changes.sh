@@ -43,7 +43,7 @@ main() {
     
     # Ajouter les fichiers modifiés
     log "Ajout des fichiers modifiés"
-    git add package.json app.json pubspec.yaml pom.xml Cargo.toml CHANGELOG.md docs/ || true
+    git add . || true
     
     # Vérifier s'il y a des changements à commiter
     if git diff --cached --quiet; then
