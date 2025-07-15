@@ -14,10 +14,6 @@ inputs:
     description: 'Version de Node.js à utiliser'
     required: false
     default: '18'
-  package-manager:
-    description: 'Package manager à utiliser (npm, yarn, pnpm)'
-    required: false
-    default: 'npm'
   project-name:
     description: 'Nom du projet pour les messages du changelog'
     required: false
@@ -60,23 +56,11 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-        cache: ${{ inputs.package-manager }}
 
     - name: 📦 Install dependencies
       shell: bash
-      run: |
-        case "${{ inputs.package-manager }}" in
-          "yarn")
-            yarn install --frozen-lockfile
-            ;;
-          "pnpm")
-            pnpm install --frozen-lockfile
-            ;;
-          *)
-            npm ci --legacy-peer-deps
-            ;;
-        esac
-
+      run: npm ci --legacy-peer-deps
+      
     - name: 🔍 Detect or validate version
       id: detect-version
       shell: bash
@@ -91,7 +75,6 @@ runs:
       run: ${{ github.action_path }}/scripts/update-versions.sh
       env:
         VERSION: ${{ steps.detect-version.outputs.version }}
-        PACKAGE_MANAGER: ${{ inputs.package-manager }}
 
     - name: 📝 Generate changelog
       id: generate-changelog
@@ -103,52 +86,19 @@ runs:
     - name: 🧪 Run tests
       if: inputs.run-tests == 'true'
       shell: bash
-      run: |
-        case "${{ inputs.package-manager }}" in
-          "yarn")
-            yarn test
-            ;;
-          "pnpm")
-            pnpm test
-            ;;
-          *)
-            npm test
-            ;;
-        esac
+      run: npm test
       continue-on-error: false
 
     - name: 🎨 Format code
       if: inputs.format-code == 'true'
       shell: bash
-      run: |
-        case "${{ inputs.package-manager }}" in
-          "yarn")
-            yarn format || yarn run format || echo "⚠️ Format script not found"
-            ;;
-          "pnpm")
-            pnpm format || pnpm run format || echo "⚠️ Format script not found"
-            ;;
-          *)
-            npm run format || echo "⚠️ Format script not found"
-            ;;
-        esac
+      run: npm run format || echo "⚠️ Format script not found"
       continue-on-error: true
 
     - name: 📚 Generate documentation
       if: inputs.generate-docs == 'true'
       shell: bash
-      run: |
-        case "${{ inputs.package-manager }}" in
-          "yarn")
-            yarn doc || yarn run doc || echo "⚠️ Doc script not found"
-            ;;
-          "pnpm")
-            pnpm doc || pnpm run doc || echo "⚠️ Doc script not found"
-            ;;
-          *)
-            npm run doc || echo "⚠️ Doc script not found"
-            ;;
-        esac
+      run: npm run doc || echo "⚠️ Doc script not found"
       continue-on-error: true
 
     - name: 💾 Commit changes

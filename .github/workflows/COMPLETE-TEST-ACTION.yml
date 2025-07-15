@@ -195,9 +195,6 @@ jobs:
   test-package-managers:
     name: 🧪 Test Package Managers
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        package-manager: ['npm', 'yarn', 'pnpm']
 
     steps:
       - name: 📥 Checkout
@@ -205,7 +202,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🔧 Setup ${{ matrix.package-manager }}
+      - name: 🔧 Setup npm
         run: |
           # Package.json standard
           cat > package.json << 'EOF'
@@ -216,33 +213,21 @@ jobs:
           }
           EOF
 
-          # Créer les lock files selon le package manager
-          case "${{ matrix.package-manager }}" in
-            npm)
-              echo "{}" > package-lock.json
-              ;;
-            yarn)
-              echo "# yarn.lock" > yarn.lock
-              ;;
-            pnpm)
-              echo "lockfileVersion: 5.4" > pnpm-lock.yaml
-              ;;
-          esac
+          echo "{}" > package-lock.json
 
-      - name: 🧪 Test avec ${{ matrix.package-manager }}
+      - name: 🧪 Test avec npm
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          version: 'v1.0.1-${{ matrix.package-manager }}'
-          project-name: 'Test ${{ matrix.package-manager }}'
-          package-manager: ${{ matrix.package-manager }}
+          version: 'v1.0.1-npm'
+          project-name: 'Test npm'
           run-tests: 'false'
           commit-changes: 'false'
           format-code: 'false'
           generate-docs: 'false'
         id: test-pm
 
-      - name: 📊 Résultats ${{ matrix.package-manager }}
+      - name: 📊 Résultats npm
         run: |
-          echo "### Test ${{ matrix.package-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Test npm" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ steps.test-pm.outputs.version }}" >> $GITHUB_STEP_SUMMARY
